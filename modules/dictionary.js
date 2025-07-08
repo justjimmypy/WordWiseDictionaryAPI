@@ -145,12 +145,17 @@ async function queryInternet (word, language) {
 
 	let response = await fetch(url, {
 		agent: httpsAgent,
+		timeout: 10000, // 10 second timeout to prevent hanging requests
 		headers: new fetch.Headers({
 			"accept": "*/*",
 			"accept-encoding": "gzip, deflate, br",
 			"accept-language": "en-US,en;q=0.9",
-			"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36"
-		})
+			"user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+		}),
+		// Security improvements
+		redirect: 'follow',
+		follow: 3, // max 3 redirects
+		size: 1048576 // 1MB max response size
 	});
 
 	if (response.status === 404) { throw new errors.NoDefinitionsFound({ reason: 'Website returned 404.'}); }
