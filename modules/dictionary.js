@@ -1,12 +1,81 @@
-const fs = require('fs'),
-	_ = require('lodash'),
-	https = require('https'),
+const https = require('https'),
 	fetch = require('node-fetch'),
 
 	utils = require('./utils.js'),
 	errors = require('./errors.js'),
 
-	httpsAgent = new https.Agent({ keepAlive: true });
+	// Optimized HTTPS agent with better connection pooling
+	httpsAgent = new https.Agent({ 
+		keepAlive: true,
+		keepAliveMsecs: 30000,
+		maxSockets: 50,
+		maxFreeSockets: 10,
+		timeout: 30000,
+		freeSocketTimeout: 15000
+	});
+
+// Utility functions to replace lodash
+const get = (obj, path, defaultValue) => {
+    const keys = path.split('.');
+    let result = obj;
+    for (const key of keys) {
+        if (result == null) return defaultValue;
+        result = result[key];
+    }
+    return result !== undefined ? result : defaultValue;
+};
+
+const isEmpty = (value) => {
+    if (value == null) return true;
+    if (Array.isArray(value) || typeof value === 'string') return value.length === 0;
+    if (typeof value === 'object') return Object.keys(value).length === 0;
+    return false;
+};
+
+const defaults = (target, ...sources) => {
+    for (const source of sources) {
+        for (const key in source) {
+            if (target[key] === undefined) {
+                target[key] = source[key];
+            }
+        }
+    }
+    return target;
+};
+
+const pick = (obj, keys) => {
+    const result = {};
+    for (const key of keys) {
+        if (key in obj) {
+            result[key] = obj[key];
+        }
+    }
+    return result;
+};
+
+const chain = (value) => ({
+    find: (predicate) => {
+        const found = Array.isArray(value) ? value.find(predicate) : undefined;
+        return chain(found);
+    },
+    get: (path) => {
+        return chain(get(value, path));
+    },
+    value: () => value
+});
+
+const reduce = (collection, iteratee, accumulator) => {
+    if (Array.isArray(collection)) {
+        for (let i = 0; i < collection.length; i++) {
+            accumulator = iteratee(accumulator, collection[i], i);
+        }
+    } else if (collection && typeof collection === 'object') {
+        for (const key in collection) {
+            accumulator = iteratee(accumulator, collection[key], key);
+        }
+    }
+    return accumulator;
+};
 
 function transformV2toV1 (data) {
 	return data.map((entry) => {
@@ -67,7 +136,7 @@ function transform (word, language, data, { include }) {
 								subentry.sense_families.push(subentry.sense_family);
 							}
 
-							return _.defaults(subentry, _.pick(entry, ['phonetics', 'etymology']))
+							return defaults(subentry, pick(entry, ['phonetics', 'etymology']))
 						})
 
 				return accumulator.concat(mappedSubentries);
@@ -77,14 +146,14 @@ function transform (word, language, data, { include }) {
 				
 				return {
 					word: lemma || headword,
-					phonetic: _.get(phonetics, '0.text'),
+					phonetic: get(phonetics, '0.text'),
 					phonetics: phonetics.map((e) => {
 						return {
 							text: e.text,
 							audio: e.oxford_audio
 						};
 					}),
-					origin: _.get(etymology, 'etymology.text'),
+					origin: get(etymology, 'etymology.text'),
 					meanings: sense_families.map((sense_family) => {
 						let { parts_of_speech, senses = []} = sense_family;
 
@@ -92,7 +161,7 @@ function transform (word, language, data, { include }) {
 						// Current hypothesis tells that it means only one sense is present
 						// We need to take out parts_of_speech from it and use it.
 						if (!parts_of_speech) {
-							parts_of_speech = _.get(senses[0], 'parts_of_speech', []);
+							parts_of_speech = get(senses[0], 'parts_of_speech', []);
 
 							if (senses.length > 1) {
 								utils.logEvent(word, language, 'part of speech missing but more than one sense present', { data });
@@ -104,25 +173,22 @@ function transform (word, language, data, { include }) {
 						}
 
 						return {
-							partOfSpeech: _.get(parts_of_speech[0], 'value'),
+							partOfSpeech: get(parts_of_speech[0], 'value'),
 							definitions: senses.map((sense) => {							
 								let { definition = {}, example_groups = [], thesaurus_entries = [] } = sense,
 									result = {
 										definition: definition.text,
-										example: _.get(example_groups[0], 'examples.0'),
-										synonyms: _.get(thesaurus_entries[0], 'synonyms.0.nyms', [])
+										example: get(example_groups[0], 'examples.0'),
+										synonyms: get(thesaurus_entries[0], 'synonyms.0.nyms', [])
 											.map(e => e.nym),
-										antonyms: _.get(thesaurus_entries[0], 'antonyms.0.nyms', [])
+										antonyms: get(thesaurus_entries[0], 'antonyms.0.nyms', [])
 											.map(e => e.nym)
 									};
 
 								if (include.example) {
-									result.examples =  _.reduce(example_groups, (accumulator, example_group) => {
-										let example = _.get(example_group, 'examples', []);
-
-										accumulator = accumulator.concat(example);
-
-										return accumulator;
+									result.examples = reduce(example_groups, (accumulator, example_group) => {
+										let example = get(example_group, 'examples', []);
+										return accumulator.concat(example);
 									}, []);
 								}
 
@@ -161,9 +227,9 @@ async function queryInternet (word, language) {
 
 	let body = await response.text(),
 		data = JSON.parse(body.substring(4)),
-		single_results = _.get(data, 'feature-callback.payload.single_results', []),
-			error = _.chain(single_results)
-					.find('widget')
+		single_results = get(data, 'feature-callback.payload.single_results', []),
+			error = chain(single_results)
+					.find(item => item.widget)
 					.get('widget.error')
 					.value()
 
@@ -185,7 +251,7 @@ async function fetchFromSource (word, language) {
 async function findDefinitions (word, language, { include }) {
 	let dictionaryData = await fetchFromSource(word, language);
 
-	if (_.isEmpty(dictionaryData)) { throw new errors.UnexpectedError(); }
+	if (isEmpty(dictionaryData)) { throw new errors.UnexpectedError(); }
 
 	return transform(word, language, dictionaryData, { include });
 }
