@@ -31,7 +31,7 @@ module.exports = {
 
             this.name = 'UnexpectedError';
             this.title = 'Something Went Wrong';
-            this.message = 'Sorry pal, something went wrong, and it\s not your fault.';
+            this.message = 'Sorry pal, something went wrong, and it\'s not your fault.';
             this.resolution = 'You can try the search again at later time or head to the web instead.';
             this.additionalInfo = additionalInfo;
             this.requestType = 'serverError';

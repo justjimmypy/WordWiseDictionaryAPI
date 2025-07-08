@@ -28,12 +28,19 @@ const // Versions
 
 module.exports = {
     logEvent (word, language, message, additionalInfo = {}) {
-        console.log({
-            'Word': word,
-            'Language': language,
-            'Message': message,
-            'AdditionalInfo': JSON.stringify(additionalInfo)
-        });
+        // Structured logging for better production monitoring
+        const logEntry = {
+            timestamp: new Date().toISOString(),
+            level: 'INFO',
+            word: word,
+            language: language,
+            message: message,
+            additionalInfo: additionalInfo,
+            pid: process.pid
+        };
+        
+        // Use JSON logging for easier parsing by log aggregators
+        console.log(JSON.stringify(logEntry));
     },
 
     isLanguageSupported (language) {
